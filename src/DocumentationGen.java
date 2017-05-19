@@ -124,15 +124,13 @@ public class DocumentationGen extends Application {
 						});
 						r.parseDocs(this.outputDestination);
 					} catch (IOException e) {
-						
+						e.printStackTrace();
 					}
 				} else {
 					//move to back end of 'queue'
 					l.add(r);
-					//sleep to prevent infinite loops from killing processor if waiting for download
-					try { 
-						Thread.sleep(10); 
-					} catch(InterruptedException e){}
+					//Yield to prevent infinite loops from killing processor if waiting for download
+					Thread.yield();
 				}
 			}
 		});
