@@ -3,7 +3,7 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.Arrays;
+import java.util.StringTokenizer;
 
 public class ClassNameRef {
 	/**name of class (fully qualified; ex: java.lang.String) */
@@ -11,6 +11,10 @@ public class ClassNameRef {
 
 	/** the url of the java docs for this class */
 	private String webURL;
+	
+	private static String copyrightInfo = "///@author Zach Jones\n" + 
+			"///You may reproduce this file, or modify it in any way, without removing this " + 
+			"top section.\n///Also include the link to this file from Github.\n";
 
 	/** The start of the class description, (ex. Class String) */
 	private static String nameStart = "<h2 title=\"";
@@ -20,6 +24,8 @@ public class ClassNameRef {
 	private static String interfacesStart = "<dt>All Implemented Interfaces:</dt>\n<dd>";
 	/** The start of the class's constructor's details */
 	private static String constructorStart = "<h3>Constructor Detail</h3>";
+	/** The start of the class's method details */
+	private static String methodStart = "<h3>Method Detail</h3>";
 	
 
 	public ClassNameRef(String name, String webURL){
@@ -33,6 +39,18 @@ public class ClassNameRef {
 	 */
 	public String getName() {
 		return name;
+	}
+	
+	/**
+	 * Gets the short name.
+	 * @return The name of the class (example "String" for java.lang.String)
+	 */
+	public String getShortName(){
+		if(name.lastIndexOf('.') != -1){
+			return name.substring(name.lastIndexOf('.') + 1);
+		} else {
+			return name;
+		}
 	}
 
 	/**
@@ -127,6 +145,9 @@ public class ClassNameRef {
 		//the writers for the class
 		PrintWriter headerPW = new PrintWriter(this.getLocalHeader(docDirectory));
 		PrintWriter sourcePW = new PrintWriter(this.getLocalSource(docDirectory));
+		// @author stuff
+		headerPW.println(copyrightInfo);
+		sourcePW.println(copyrightInfo);
 		
 		//write top info
 		//convert java.lang.String to JAVA_LANG_STRING_H (c convention for headers)
@@ -135,12 +156,28 @@ public class ClassNameRef {
 		headerPW.println("#define " + headerDefine);
 		//typedef
 		String nameWithUnderscores = this.getName().replace('.', '_');
-		headerPW.println("\ntypedef struct " + nameWithUnderscores + "_S * " + nameWithUnderscores);
+		headerPW.println("\ntypedef struct " + nameWithUnderscores + "_S * " 
+				+ nameWithUnderscores + ";");
+		
+		//print the class modifiers (example: 'public', 'abstract', 'class')
+		int start = contents.indexOf("<pre>") + 5;
+		int end = contents.indexOf("</pre>");
+		String declaration = contents.substring(start, end);
+		//get @public, @abstract, @class, ....
+		for (String i : declaration.split(" ")){
+			if(i.equals("<span")){
+				break;
+			}
+			if(i.equals("")){
+				continue;
+			}
+			sourcePW.println("@" + i);
+		}
 		
 		//determine if it is generic (has the &lt; and &gt; in the name line 
 		// name line: (<h2 title="Class ClassName" .. > Class ClassName<T1,T2>))
-		int start = contents.indexOf(nameStart);
-		int end = contents.indexOf("\n", start);
+		start = contents.indexOf(nameStart);
+		end = contents.indexOf("\n", start);
 		String nameLine = contents.substring(start, end);
 		start = nameLine.indexOf("&lt;") + 4;
 		end = nameLine.indexOf("&gt;", start);
@@ -166,7 +203,6 @@ public class ClassNameRef {
 			superClass = contents.substring(start, end);
 			//correct the link to be the class name
 			superClass = superClass.replace("../", "").replace('/', '_').replace(".html", "");
-			System.out.println("Superclass: " + superClass);
 			start = contents.indexOf(inheritanceStart, start) + inheritanceStart.length();
 			end = contents.indexOf('\"', start + 1);
 		} while(start != -1 + inheritanceStart.length() && end > start);
@@ -184,6 +220,9 @@ public class ClassNameRef {
 			String inter = contents.substring(start, end);
 			interfaces = inter.split("<a href=\"");
 			for (int i = 0; i < interfaces.length; i++){
+				if(interfaces[i].indexOf('\"') == -1){
+					continue; //ignore strings that aren't properly formatted, and empty ones
+				}
 				//extract the interfaces in the notation used previously
 				interfaces[i] = interfaces[i].substring(0, interfaces[i].indexOf('\"'));
 				interfaces[i] = interfaces[i].replace("../", "")
@@ -193,25 +232,69 @@ public class ClassNameRef {
 		if(interfaces != null){
 			sourcePW.print("@implements ");
 			for(String i : interfaces){
-				sourcePW.print(i);
+				if(!i.equals("")){
+					sourcePW.print(i + " ");
+				}
 			}
 			sourcePW.println();
 		}
-		System.out.println("Implments: " + Arrays.toString(interfaces));
 		
 		//include statements that will almost always be used
-		sourcePW.println("#include <stdint.h>"); //for any number value (ex. int32_t for int)
+		sourcePW.println("\n#include <stdint.h>"); //for any number value (ex. int32_t for int)
 		sourcePW.println("#include <stdbool.h>"); //for booleans
 		sourcePW.println("#include <stdlib.h>"); //malloc - always used
+		sourcePW.println();
+		
+		//non-private fields
+		//TODO
+		sourcePW.println("struct " + nameWithUnderscores + "_S {");
+		//members -- these don't require .getX()
+		sourcePW.println("};");
 		
 		//constructors
 		start = contents.indexOf(constructorStart, end);
 		if(start != -1){
-			while(start != 4){
-				start = contents.indexOf("<pre>", end) + 5;
-				end = contents.indexOf("</pre>", start) - 6;
+			int endConstructs = contents.indexOf(methodStart, end);
+			while(start != 4 && start < endConstructs){
+				start = contents.indexOf("<pre>", start + 1) + 5;
+				end = contents.indexOf("</pre>", start);
 				String def = contents.substring(start, end).replace('\n', ' ');
-				System.out.println(def);
+				def = def.replace("&nbsp;", " ");
+				//def starts with the access modifier (either public or protected should be created)
+				if(def.startsWith("private")){ continue; }
+				
+				//convert to the C syntax
+				StringTokenizer st = new StringTokenizer(def, " ()", true);
+				StringBuilder sb = new StringBuilder();
+				System.out.println('\n' + def);
+				System.out.println("Token sequence converted:");
+				boolean inTitle = false;
+				while(st.hasMoreTokens()){
+					String temp = st.nextToken();
+					if(inTitle){
+						if(temp.contains("\">")){ //end of title
+							inTitle = false;
+						}
+					} else if(temp.equals("<a") || temp.startsWith(">") 
+							|| temp.equals("public") || temp.equals("protected")){
+						
+						//ignore -- no-op
+					} else if(temp.startsWith("href=\"")){
+						//href="../../java/lang/String.html" to java_lang_String
+						temp = temp.substring(6).replace("../", "").replace("\"", "");
+						temp = temp.replace(".html", "").replace('/', '_');
+						sb.append(temp);
+					} else if(temp.equals(this.getShortName())){
+						//matches this class name, write fully qualified
+						sb.append("THIS CLASS NAME");//this.name);
+					} else if(temp.startsWith("title=\"")){
+						inTitle = true;
+					} else {
+						//'(', ' ', and ')', ',' don't change, as well as things that don't match
+						sb.append(temp);
+					}
+				}
+				System.out.println(sb.toString().replaceAll(" +", " ")); //replace 1+ spaces with 1
 			}
 		} else {
 			//default constructor ClassName ClassName_init();
@@ -221,8 +304,10 @@ public class ClassNameRef {
 		
 		//use lastIndexOf(String, int) for searching backwards
 		
+		//methods
+		
 		//print the ending of the header
-		headerPW.println("#endif");
+		headerPW.println("\n#endif");
 		
 		headerPW.flush();
 		sourcePW.flush();
