@@ -56,6 +56,7 @@ public class DocumentationGen extends Application {
 			}
 			this.outputDestination = opened.getAbsolutePath();
 			t.appendText("Destination folder: " + this.outputDestination + "\nGetting class list:\n");
+			
 			this.getClasses();
 		});
 		ap.getChildren().add(b);
